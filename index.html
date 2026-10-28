@@ -1,0 +1,1468 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>pane: Windows-style window management for the Mac</title>
+<meta name="description" content="pane gives your Mac a taskbar in place of the Dock, a Start menu, Windows snapping, Alt+Tab between windows, and apps that quit when their last window closes.">
+<meta property="og:title" content="pane: Windows-style window management for the Mac">
+<meta property="og:description" content="A taskbar in place of the Dock, a Start menu, snapping and Alt+Tab, for macOS 14 or later.">
+<meta property="og:type" content="website">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Funnel+Display:wght@500;600;700&family=Funnel+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="preload" as="image" href="assets/windows/finder.png">
+<link rel="preload" as="image" href="assets/windows/safari.png">
+<style>
+:root {
+  /* a clear midday sky: deep at the zenith, hazy at the horizon */
+  --sky-1: #2F74BF;
+  --sky-2: #5895D3;
+  --sky-3: #A2C8E8;
+  --sky-4: #DCE8EE;
+  --glow: rgba(246, 249, 250, .7);
+  --grain-opacity: .22;
+  --paper: #EDF2F5;
+  --ink: #15203A;
+  --muted: #4A5872;
+  --signal: #1B5FD1;
+  --signal-ink: #FFFFFF;
+  --rule: rgba(21, 32, 58, .14);
+  --window: #FBFCFD;
+  --window-bar: #EFF3F7;
+  --glass: rgba(222, 232, 243, .74);
+  --glass-edge: rgba(255, 255, 255, .8);
+  --glass-line: rgba(21, 32, 58, .12);
+  --flyout: rgba(238, 243, 249, .92);
+  --hover: rgba(21, 32, 58, .07);
+  --press: rgba(21, 32, 58, .12);
+  --running: #7D879A;
+  --key: #FFFFFF;
+  --key-edge: rgba(21, 32, 58, .22);
+  --shadow-window: 0 1px 1px rgba(21, 32, 58, .08), 0 24px 60px -12px rgba(21, 40, 80, .38);
+  --badge: #E5484D;
+
+  --display: "Funnel Display", ui-sans-serif, system-ui, sans-serif;
+  --text: "Funnel Sans", ui-sans-serif, system-ui, sans-serif;
+  --system: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+
+  --menu: 30px;
+  --bar: 48px;
+  --measure: 64ch;
+  --page: 1120px;
+  --gutter: 24px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* the same sky at night, with a town's sodium glow low on the horizon */
+    --sky-1: #04080F;
+    --sky-2: #0A1524;
+    --sky-3: #142A40;
+    --sky-4: #22405A;
+    --glow: rgba(204, 132, 66, .34);
+    --grain-opacity: .4;
+    --paper: #12171E;
+    --ink: #E6EAF0;
+    --muted: #A0AAB8;
+    --signal: #5EA3FF;
+    --signal-ink: #06101F;
+    --rule: rgba(230, 234, 240, .13);
+    --window: #1A2029;
+    --window-bar: #212833;
+    --glass: rgba(26, 32, 41, .7);
+    --glass-edge: rgba(255, 255, 255, .1);
+    --glass-line: rgba(0, 0, 0, .4);
+    --flyout: rgba(30, 36, 46, .93);
+    --hover: rgba(230, 234, 240, .08);
+    --press: rgba(230, 234, 240, .14);
+    --running: #8E97A5;
+    --key: #242B36;
+    --key-edge: rgba(230, 234, 240, .2);
+    --shadow-window: 0 0 0 1px rgba(255, 255, 255, .07), 0 24px 60px -12px rgba(0, 0, 0, .6);
+  }
+}
+@media (max-width: 720px) { :root { --gutter: 16px; } }
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+body {
+  margin: 0;
+  padding-bottom: var(--bar);
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 17px/1.55 var(--text);
+  overflow-x: hidden;
+}
+a { color: var(--signal); text-underline-offset: .18em; text-decoration-thickness: 1px; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; border-radius: 4px; }
+svg { display: block; }
+img { display: block; }
+
+/* ---------- the macOS menu bar: the page's own menus ---------- */
+.menubar {
+  position: fixed;
+  z-index: 60;
+  top: 0; left: 0; right: 0;
+  height: var(--menu);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 10px;
+  color: #fff;
+  font: 500 13px/1 var(--system);
+  transition: background-color .2s, color .2s;
+}
+.menubar::before {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  background: linear-gradient(180deg, rgba(0, 0, 0, .22), rgba(0, 0, 0, 0));
+  transition: opacity .2s;
+}
+.menubar.is-solid {
+  color: var(--ink);
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(28px) saturate(1.7);
+  backdrop-filter: blur(28px) saturate(1.7);
+  box-shadow: 0 1px 0 var(--glass-line);
+}
+.menubar.is-solid::before { opacity: 0; }
+.menubar a, .menubar .mb-app {
+  display: flex; align-items: center; gap: 7px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: inherit;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.menubar .mb-app { font-weight: 700; }
+.menubar .mb-app svg { width: 16px; height: 16px; }
+.menubar a:hover, .menubar a[aria-current] { background: rgba(255, 255, 255, .22); }
+.menubar.is-solid a:hover, .menubar.is-solid a[aria-current] { background: var(--hover); }
+.mb-menus { display: contents; }
+.mb-right { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+.mb-right svg { width: 16px; height: 16px; }
+.mb-clock { padding: 0 8px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (max-width: 860px) { .mb-menus, .mb-right .mb-github { display: none; } }
+
+/* ---------- the desktop (hero) ---------- */
+.desktop {
+  position: relative;
+  height: 100vh;
+  height: 100svh;
+  min-height: 640px;
+  overflow: hidden;
+  background:
+    linear-gradient(0deg, var(--glow) 0%, transparent 22%),
+    linear-gradient(180deg, var(--sky-1) 0%, var(--sky-2) 28%, var(--sky-3) 66%, var(--sky-4) 100%);
+}
+/* Film grain, so the sky reads as a wallpaper rather than a flat gradient. */
+.desktop::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: var(--grain-opacity);
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.snap-preview {
+  position: absolute;
+  z-index: 40;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--signal) 22%, transparent);
+  border: 2px solid color-mix(in srgb, var(--signal) 75%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s, left .16s, top .16s, width .16s, height .16s;
+}
+.snap-preview.is-on { opacity: 1; }
+
+/* Windows. Without JavaScript they sit in their snap layout; the script takes over their frames. */
+.window {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  box-shadow: var(--shadow-window);
+  overflow: hidden;
+  transform-origin: 50% 100%;
+}
+.window-pane { z-index: 12; left: 0; top: var(--menu); width: 50%; height: calc(100% - var(--menu) - var(--bar)); background: var(--window); }
+.window-shot { z-index: 11; left: 50%; width: 50%; height: calc((100% - var(--menu) - var(--bar)) / 2); background: #1E1E1E; }
+.window-shot[data-win="finder"] { top: var(--menu); }
+.window-shot[data-win="safari"] { top: calc(var(--menu) + (100% - var(--menu) - var(--bar)) / 2); z-index: 10; }
+.window-shot img { width: 100%; height: 100%; object-fit: cover; object-position: left top; pointer-events: none; user-select: none; }
+.window.is-animating { transition: left .24s cubic-bezier(.2, .8, .2, 1), top .24s cubic-bezier(.2, .8, .2, 1), width .24s cubic-bezier(.2, .8, .2, 1), height .24s cubic-bezier(.2, .8, .2, 1); }
+.window.is-dragging { cursor: grabbing; user-select: none; }
+.window.is-hidden {
+  opacity: 0;
+  transform: translateY(40px) scale(.6);
+  pointer-events: none;
+  visibility: hidden;
+  transition: opacity .18s, transform .18s, visibility 0s .18s;
+}
+.window.is-returning { transition: opacity .18s, transform .18s; }
+
+.titlebar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 14px;
+  background: var(--window-bar);
+  border-bottom: 1px solid var(--rule);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  flex: none;
+}
+.lights { display: flex; gap: 8px; }
+.light {
+  width: 13px; height: 13px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: default;
+  position: relative;
+}
+.light::after { content: ""; position: absolute; inset: -5px; }
+.light-close { background: #FF5F57; }
+.light-min { background: #FEBC2E; }
+.light-max { background: #28C840; }
+.light svg { opacity: 0; width: 13px; height: 13px; }
+.lights:hover .light svg, .light:focus-visible svg { opacity: .7; }
+.title {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  font: 600 13px var(--system);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.window-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  padding: clamp(24px, 6cqi, 64px);
+  container-type: inline-size;
+}
+/* Centred when there's room, top-aligned (and scrollable) when there isn't. */
+.window-body > :first-child { margin-top: auto; }
+.window-body > :last-child { margin-bottom: auto; }
+.window-body > * { max-width: 34em; }
+.hero-title {
+  margin: 0 0 .4em;
+  max-width: 11em;
+  font: 700 clamp(34px, 11cqi, 88px)/.98 var(--display);
+  letter-spacing: -.025em;
+  text-wrap: balance;
+}
+.hero-lede { margin: 0 0 28px; font-size: clamp(16px, 2.6cqi, 19px); color: var(--muted); text-wrap: pretty; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: center; }
+.button {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 44px;
+  padding: 0 22px;
+  border-radius: 999px;
+  font: 600 16px var(--text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.button-primary { background: var(--signal); color: var(--signal-ink); }
+.button-primary:hover { background: color-mix(in srgb, var(--signal) 88%, var(--ink)); }
+.button-quiet { color: var(--ink); box-shadow: inset 0 0 0 1px var(--rule); }
+.button-quiet:hover { background: var(--hover); }
+.fine { margin: 18px 0 0; font-size: 14px; color: var(--muted); }
+.try {
+  margin: clamp(28px, 6cqi, 48px) 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--rule);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.try kbd { font-size: 12px; padding: 1px 5px; min-width: 1.6em; }
+
+/* ---------- Snap Layouts, on the green button ---------- */
+.snap-flyout {
+  position: absolute;
+  z-index: 45;
+  display: grid;
+  grid-template-columns: repeat(3, 88px);
+  gap: 10px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--flyout);
+  -webkit-backdrop-filter: blur(30px) saturate(1.6);
+  backdrop-filter: blur(30px) saturate(1.6);
+  box-shadow: inset 0 0 0 1px var(--glass-edge), 0 16px 40px -12px rgba(0, 0, 0, .4);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity .14s, transform .14s, visibility 0s .14s;
+}
+.snap-flyout.is-open { opacity: 1; visibility: visible; transform: none; transition: opacity .14s, transform .14s; }
+.layout { position: relative; height: 54px; }
+.zone {
+  position: absolute;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ink) 22%, transparent);
+  cursor: default;
+}
+.zone:hover, .zone:focus-visible { background: var(--signal); outline: none; }
+
+/* ---------- Alt+Tab ---------- */
+.switcher {
+  position: fixed;
+  z-index: 70;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  gap: 8px;
+  max-width: calc(100% - 32px);
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--flyout);
+  -webkit-backdrop-filter: blur(40px) saturate(1.6);
+  backdrop-filter: blur(40px) saturate(1.6);
+  box-shadow: inset 0 0 0 1px var(--glass-edge), 0 24px 60px -16px rgba(0, 0, 0, .5);
+  font-family: var(--system);
+}
+.switcher[hidden] { display: none; }
+.switch-tile {
+  display: flex; flex-direction: column; gap: 8px;
+  width: 220px;
+  padding: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font: 500 13px var(--system);
+  text-align: left;
+  cursor: default;
+}
+.switch-tile:hover { background: var(--hover); }
+.switch-tile[aria-selected="true"] { box-shadow: inset 0 0 0 2px var(--signal); }
+.switch-head { display: flex; align-items: center; gap: 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.switch-head img, .switch-head svg { width: 16px; height: 16px; flex: none; }
+.switch-thumb { height: 124px; border-radius: 6px; overflow: hidden; background: var(--window); }
+.switch-thumb img { width: 100%; height: 100%; object-fit: cover; object-position: left top; }
+.mini-pane { height: 100%; padding: 16px; font: 700 20px/1 var(--display); letter-spacing: -.02em; color: var(--ink); }
+.mini-pane span { display: block; margin-top: 10px; width: 60%; height: 6px; border-radius: 3px; background: var(--rule); }
+@media (max-width: 760px) { .switch-tile { width: 150px; } .switch-thumb { height: 84px; } }
+
+/* ---------- notification ---------- */
+.toast {
+  position: fixed;
+  z-index: 40;
+  right: 12px;
+  bottom: calc(var(--bar) + 12px);
+  width: min(360px, calc(100% - 24px));
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: var(--flyout);
+  -webkit-backdrop-filter: blur(30px) saturate(1.6);
+  backdrop-filter: blur(30px) saturate(1.6);
+  box-shadow: inset 0 0 0 1px var(--glass-edge), 0 16px 40px -12px rgba(0, 0, 0, .35);
+  font: 14px/1.45 var(--system);
+  transform: translateY(12px);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .2s, transform .2s, visibility 0s .2s;
+}
+.toast.is-on { opacity: 1; transform: none; visibility: visible; transition: opacity .2s, transform .2s; }
+.toast strong { display: block; margin-bottom: 2px; font-weight: 600; }
+.toast p { margin: 0; color: var(--muted); }
+
+/* ---------- taskbar ---------- */
+.taskbar {
+  position: fixed;
+  z-index: 50;
+  left: 0; right: 0; bottom: 0;
+  height: calc(var(--bar) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(28px) saturate(1.7);
+  backdrop-filter: blur(28px) saturate(1.7);
+  box-shadow: 0 -1px 0 var(--glass-line), inset 0 1px 0 var(--glass-edge);
+  font-family: var(--system);
+}
+.taskbar-apps { grid-column: 2; display: flex; gap: 4px; }
+.tb-button {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  width: 44px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  text-decoration: none;
+  cursor: default;
+}
+.tb-button:hover { background: var(--hover); }
+.tb-button:active > :first-child { transform: scale(.86); }
+.tb-button svg, .tb-button img { width: 24px; height: 24px; flex: none; transition: transform .08s; }
+.tb-button::after {
+  content: "";
+  position: absolute; left: 50%; bottom: 2px;
+  width: 0; height: 3px;
+  border-radius: 2px;
+  background: var(--running);
+  transform: translateX(-50%);
+  transition: width .18s, background-color .18s;
+}
+.tb-button.is-running::after { width: 6px; }
+.tb-button.is-active { background: var(--hover); }
+.tb-button.is-active::after { width: 16px; background: var(--signal); }
+.tb-start[aria-expanded="true"] { background: var(--press); }
+.badge {
+  position: absolute; top: 3px; right: 5px;
+  min-width: 15px; height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--badge);
+  color: #fff;
+  font: 600 10px/15px var(--system);
+  text-align: center;
+}
+
+.tray { grid-column: 3; justify-self: end; display: flex; align-items: center; height: 100%; }
+.tray .tb-button { width: 36px; }
+.tray .tb-button svg { width: 18px; height: 18px; }
+.clock {
+  display: flex; flex-direction: column; align-items: flex-end; justify-content: center;
+  height: 40px;
+  padding: 0 10px;
+  font: 400 12px/1.3 var(--system);
+  font-variant-numeric: tabular-nums;
+}
+.show-desktop {
+  width: 10px; height: 100%;
+  margin-left: 4px;
+  border: 0; padding: 0;
+  background: transparent;
+  box-shadow: inset 1px 0 0 var(--rule);
+}
+.show-desktop:hover { background: var(--hover); }
+@media (max-width: 720px) {
+  .clock, .tray .tb-github, .tb-optional { display: none; }
+  .taskbar { grid-template-columns: 0 1fr auto; }
+  .taskbar-apps { justify-content: center; }
+}
+
+/* ---------- Start ---------- */
+.start {
+  position: fixed;
+  z-index: 49;
+  left: 50%;
+  bottom: calc(var(--bar) + 12px);
+  width: min(600px, calc(100% - 16px));
+  max-height: calc(100% - var(--bar) - var(--menu) - 24px);
+  overflow: auto;
+  padding: 24px 28px 0;
+  border-radius: 8px;
+  background: var(--flyout);
+  -webkit-backdrop-filter: blur(40px) saturate(1.7);
+  backdrop-filter: blur(40px) saturate(1.7);
+  box-shadow: inset 0 0 0 1px var(--glass-edge), 0 24px 60px -16px rgba(0, 0, 0, .45);
+  font-family: var(--system);
+  transform: translate(-50%, 16px);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .16s, transform .2s cubic-bezier(.2, .8, .2, 1), visibility 0s .2s;
+}
+.start.is-open { opacity: 1; transform: translate(-50%, 0); visibility: visible; transition: opacity .16s, transform .2s cubic-bezier(.2, .8, .2, 1); }
+.start-search {
+  display: flex; align-items: center; gap: 10px;
+  height: 38px;
+  margin-bottom: 20px;
+  padding: 0 14px;
+  border-radius: 19px;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  box-shadow: inset 0 0 0 1px var(--rule);
+}
+.start-search svg { width: 16px; height: 16px; color: var(--muted); flex: none; }
+.start-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--ink); font: 14px var(--system); outline: none; }
+.start-search:focus-within { box-shadow: inset 0 0 0 2px var(--signal); }
+.start h2 { margin: 0 0 8px; font: 600 14px var(--system); }
+.start-apps { display: grid; grid-template-columns: repeat(6, 1fr); margin: 0 -8px 16px; padding: 0; list-style: none; }
+.start-app {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  width: 100%;
+  padding: 10px 2px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  font: 12px var(--system);
+  text-align: center;
+  cursor: default;
+}
+.start-app:hover { background: var(--hover); }
+.start-app img { width: 32px; height: 32px; }
+.start-links { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; margin: 0 -8px 20px; padding: 0; list-style: none; }
+.start-links a {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px;
+  border-radius: 4px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.3;
+  text-decoration: none;
+}
+.start-links a:hover, .start-links a:focus-visible { background: var(--hover); }
+.start-links svg { width: 26px; height: 26px; flex: none; }
+.start-links small { display: block; color: var(--muted); font-size: 12px; }
+.start-empty { margin: 0 0 20px; font-size: 13px; color: var(--muted); }
+.start-foot {
+  position: sticky; bottom: 0;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 0 -28px;
+  padding: 10px 28px;
+  border-top: 1px solid var(--rule);
+  background: color-mix(in srgb, var(--flyout) 100%, transparent);
+  font-size: 13px;
+}
+.start-who { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.start-who svg { width: 28px; height: 28px; }
+.start-foot nav { display: flex; gap: 4px; }
+.start-foot a { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 4px; color: var(--ink); }
+.start-foot a:hover { background: var(--hover); }
+.start-foot svg { width: 18px; height: 18px; }
+@media (max-width: 560px) {
+  .start { padding: 20px 16px 0; }
+  .start-foot { margin: 0 -16px; padding: 10px 16px; }
+  .start-apps { grid-template-columns: repeat(4, 1fr); }
+  .start-apps li:nth-child(n + 9) { display: none; }
+  .start-links { grid-template-columns: 1fr; }
+}
+
+/* ---------- page sections ---------- */
+.wrap { max-width: var(--page); margin: 0 auto; padding: 0 var(--gutter); }
+.section { padding: clamp(72px, 10vw, 128px) 0 0; scroll-margin-top: 0; }
+.section:last-of-type { padding-bottom: clamp(72px, 10vw, 128px); }
+.section-title {
+  margin: 0 0 .5em;
+  max-width: 18em;
+  font: 600 clamp(32px, 4.6vw, 52px)/1.04 var(--display);
+  letter-spacing: -.02em;
+  text-wrap: balance;
+}
+.section-lede { margin: 0 0 clamp(40px, 5vw, 64px); max-width: var(--measure); font-size: 19px; color: var(--muted); text-wrap: pretty; }
+h3 { margin: 0 0 .35em; font: 600 21px/1.25 var(--display); letter-spacing: -.005em; }
+.section p { text-wrap: pretty; }
+
+/* features */
+.features {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(40px, 5vw, 64px) clamp(28px, 4vw, 56px);
+  margin: 0; padding: 0; list-style: none;
+}
+.features p { margin: 0; color: var(--muted); max-width: 34ch; }
+.schematic { width: 100%; max-width: 240px; height: auto; margin: 0 0 22px; color: var(--ink); }
+.schematic .line { fill: none; stroke: currentColor; stroke-width: 1.5; opacity: .55; }
+.schematic .soft { fill: currentColor; opacity: .08; }
+.schematic .mid { fill: currentColor; opacity: .3; }
+.schematic .a { fill: var(--signal); }
+.schematic .a-line { fill: none; stroke: var(--signal); stroke-width: 2; }
+@media (max-width: 900px) { .features { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .features { grid-template-columns: 1fr; } }
+
+/* shortcuts */
+.keys { width: 100%; border-collapse: collapse; font-size: 16px; }
+.keys th { text-align: left; font: 500 14px var(--text); color: var(--muted); padding: 0 16px 12px 0; border-bottom: 1px solid var(--ink); }
+.keys td { padding: 14px 16px 14px 0; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+.keys td:first-child { width: 42%; }
+.keys .win { color: var(--muted); font-size: 15px; }
+kbd {
+  display: inline-block;
+  min-width: 1.9em;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--key);
+  box-shadow: inset 0 0 0 1px var(--key-edge), 0 1px 0 var(--key-edge);
+  font: 500 14px/1.5 var(--system);
+  text-align: center;
+  color: var(--ink);
+}
+.keys kbd + kbd { margin-left: 3px; }
+.keys .or { color: var(--muted); padding: 0 4px; font-size: 14px; }
+.keys-note { margin: 28px 0 0; max-width: var(--measure); color: var(--muted); }
+@media (max-width: 640px) {
+  .keys thead { display: none; }
+  .keys tr { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; padding: 14px 0; border-bottom: 1px solid var(--rule); }
+  .keys td { padding: 0; border: 0; }
+  .keys td:first-child { width: auto; grid-column: 1 / -1; font-weight: 500; }
+  .keys .win::before { content: "Windows: "; }
+}
+
+/* editions */
+.editions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: clamp(24px, 4vw, 48px); align-items: start; }
+.edition { padding: clamp(24px, 3.5vw, 40px); }
+.edition-free { padding-left: 0; }
+.edition-pro { background: var(--window); border-radius: 14px; box-shadow: inset 0 0 0 1px var(--rule); }
+.edition h3 { font-size: 28px; margin-bottom: .2em; }
+.edition-terms { margin: 0 0 24px; color: var(--muted); }
+.edition ul { margin: 0 0 32px; padding: 0; list-style: none; }
+.edition li { padding: 10px 0 10px 28px; border-top: 1px solid var(--rule); position: relative; }
+.edition li::before {
+  content: ""; position: absolute; left: 2px; top: 17px;
+  width: 12px; height: 9px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1.5px var(--muted);
+}
+.edition-pro li::before { box-shadow: none; background: linear-gradient(90deg, var(--signal) 50%, transparent 50%), transparent; outline: 1.5px solid var(--signal); outline-offset: -1.5px; }
+.edition .fine { margin-top: 14px; }
+@media (max-width: 820px) {
+  .editions { grid-template-columns: 1fr; }
+  .edition-free { padding: 0; }
+}
+
+/* restore / trust */
+.promises { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px clamp(28px, 5vw, 72px); margin: 0; }
+.promises div { padding-top: 18px; border-top: 2px solid var(--ink); }
+.promises dt { font: 600 21px/1.25 var(--display); margin-bottom: .4em; }
+.promises dd { margin: 0; color: var(--muted); max-width: 46ch; }
+@media (max-width: 720px) { .promises { grid-template-columns: 1fr; } }
+
+/* questions */
+.faq { max-width: 760px; border-top: 1px solid var(--ink); }
+.faq details { border-bottom: 1px solid var(--rule); }
+.faq summary {
+  display: flex; justify-content: space-between; align-items: center; gap: 16px;
+  padding: 20px 0;
+  font: 600 19px/1.35 var(--display);
+  cursor: pointer;
+  list-style: none;
+}
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after {
+  content: ""; flex: none;
+  width: 10px; height: 10px;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: translateY(-3px) rotate(45deg);
+  transition: transform .18s;
+}
+.faq details[open] summary::after { transform: translateY(2px) rotate(225deg); }
+.faq details p { margin: -4px 0 22px; max-width: var(--measure); color: var(--muted); }
+
+/* footer */
+.footer { padding: 40px 0 56px; border-top: 1px solid var(--rule); font-size: 14px; color: var(--muted); }
+.footer .wrap { display: grid; grid-template-columns: auto 1fr; gap: 12px 48px; }
+.brand { display: flex; align-items: center; gap: 10px; color: var(--ink); font: 700 22px var(--display); letter-spacing: -.02em; }
+.brand svg { width: 24px; height: 24px; }
+.footer nav { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-self: end; }
+.footer nav a { color: var(--ink); }
+.footer p { grid-column: 1 / -1; margin: 12px 0 0; max-width: 80ch; }
+@media (max-width: 640px) { .footer .wrap { grid-template-columns: 1fr; } .footer nav { justify-self: start; } }
+
+.section { scroll-margin-top: var(--menu); }
+
+/* ---------- small screens: the window sits in the page ---------- */
+@media (max-width: 720px) {
+  .desktop { display: flex; flex-direction: column; height: auto; min-height: 0; padding: calc(var(--menu) + 24px) var(--gutter) 0; }
+  .window-pane { position: relative; left: auto; top: auto; width: auto; height: auto; z-index: 2; }
+  /* Finder peeks out from behind pane's window. */
+  .window-shot[data-win="finder"] { position: relative; left: auto; top: auto; width: auto; height: auto; aspect-ratio: 1920 / 1136; margin: -36px -56px -24px 40px; z-index: 1; }
+  .window-shot[data-win="safari"], .snap-flyout { display: none; }
+  .titlebar { cursor: default; }
+  .try { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0s !important; transition-delay: 0s !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .taskbar, .start, .toast, .snap-flyout, .switcher, .menubar.is-solid { background: var(--window); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-mark" viewBox="0 0 24 24"><rect x="2.75" y="3.75" width="18.5" height="16.5" rx="3.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6 4.5h6v15H6a2.5 2.5 0 0 1-2.5-2.5V7A2.5 2.5 0 0 1 6 4.5z" fill="var(--signal)"/></symbol>
+    <linearGradient id="g-app" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4C8DF6"/><stop offset="1" stop-color="#1B5FD1"/></linearGradient>
+    <symbol id="i-app" viewBox="0 0 24 24"><rect x="1" y="1" width="22" height="22" rx="5.5" fill="url(#g-app)"/><rect x="5.25" y="6.25" width="13.5" height="11.5" rx="2" fill="none" stroke="#fff" stroke-width="1.4"/><path d="M7.2 7h4.3v10H7.2A1.2 1.2 0 0 1 6 15.8V8.2A1.2 1.2 0 0 1 7.2 7z" fill="#fff"/></symbol>
+    <symbol id="i-features" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3.75 16h16.5" stroke="currentColor" stroke-width="1.5"/><rect x="10.5" y="17.25" width="3" height="1.5" rx=".75" fill="currentColor"/></symbol>
+    <symbol id="i-keys" viewBox="0 0 24 24"><rect x="2.75" y="6.5" width="18.5" height="11" rx="2.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6 10h1M9 10h1M12 10h1M15 10h1M18 10h0M7.5 14h9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24"><path d="M3.75 12.6V4.75a1 1 0 0 1 1-1h7.85a1 1 0 0 1 .7.3l7.4 7.4a1 1 0 0 1 0 1.4l-7.85 7.85a1 1 0 0 1-1.4 0l-7.4-7.4a1 1 0 0 1-.3-.7z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.25" cy="8.25" r="1.5" fill="currentColor"/></symbol>
+    <symbol id="i-restore" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M6.2 3.2v3.9h3.9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 8.5V12l2.5 1.75" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+    <symbol id="i-question" viewBox="0 0 24 24"><path d="M12 20.25a8.25 8.25 0 1 0-7.3-4.4L3.75 20.25l4.4-.95a8.2 8.2 0 0 0 3.85.95z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M9.9 9.7a2.15 2.15 0 1 1 3 2c-.6.3-.9.7-.9 1.3v.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="16.1" r=".95" fill="currentColor"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.25" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M15.2 15.2 20 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-github" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2.25a9.75 9.75 0 0 0-3.08 19c.49.09.67-.21.67-.47v-1.66c-2.71.59-3.28-1.31-3.28-1.31-.44-1.13-1.08-1.43-1.08-1.43-.89-.6.07-.59.07-.59.98.07 1.5 1.01 1.5 1.01.87 1.5 2.29 1.06 2.85.81.09-.63.34-1.06.62-1.31-2.17-.25-4.44-1.08-4.44-4.81 0-1.06.38-1.93 1-2.61-.1-.25-.43-1.24.1-2.58 0 0 .82-.26 2.68 1a9.3 9.3 0 0 1 4.88 0c1.86-1.26 2.68-1 2.68-1 .53 1.34.2 2.33.1 2.58.62.68 1 1.55 1 2.61 0 3.74-2.28 4.56-4.45 4.8.35.3.66.9.66 1.81v2.69c0 .26.18.57.67.47A9.75 9.75 0 0 0 12 2.25z"/></symbol>
+  </defs>
+</svg>
+
+<nav class="menubar" aria-label="Page">
+  <a class="mb-app" href="#top"><svg aria-hidden="true"><use href="#i-mark"/></svg>pane</a>
+  <span class="mb-menus">
+    <a href="#features" data-for="features">What it adds</a>
+    <a href="#shortcuts" data-for="shortcuts">Shortcuts</a>
+    <a href="#editions" data-for="editions">Free and Pro</a>
+    <a href="#your-mac" data-for="your-mac">Your settings</a>
+    <a href="#questions" data-for="questions">Questions</a>
+  </span>
+  <span class="mb-right">
+    <a class="mb-github" href="https://github.com/lemonadesaltbagel/pane" aria-label="pane on GitHub" title="pane on GitHub"><svg aria-hidden="true"><use href="#i-github"/></svg></a>
+    <span class="mb-clock" id="mb-clock" aria-hidden="true"></span>
+  </span>
+</nav>
+
+<main>
+  <!-- The desktop: pane's window and two real Mac windows, snapped into a layout over the taskbar below. -->
+  <section class="desktop" id="top" aria-labelledby="hero-title" data-section>
+    <div class="snap-preview" aria-hidden="true"></div>
+
+    <div class="window window-shot" data-win="finder" aria-hidden="true">
+      <img src="assets/windows/finder.png" width="1920" height="1136" alt="">
+    </div>
+    <div class="window window-shot" data-win="safari" aria-hidden="true">
+      <img src="assets/windows/safari.png" width="1920" height="1132" alt="">
+    </div>
+
+    <div class="window window-pane" data-win="pane" role="group" aria-label="pane, a window you can snap">
+      <div class="titlebar">
+        <div class="lights">
+          <button class="light light-close" type="button" aria-label="Close window">
+            <svg viewBox="0 0 13 13" aria-hidden="true"><path d="M4.3 4.3l4.4 4.4M8.7 4.3l-4.4 4.4" stroke="#4D0000" stroke-width="1.2" stroke-linecap="round"/></svg>
+          </button>
+          <button class="light light-min" type="button" aria-label="Minimize window">
+            <svg viewBox="0 0 13 13" aria-hidden="true"><path d="M3.8 6.5h5.4" stroke="#5A3A00" stroke-width="1.2" stroke-linecap="round"/></svg>
+          </button>
+          <button class="light light-max" type="button" aria-label="Maximize window. Hover for Snap Layouts" aria-haspopup="true" aria-controls="snap-flyout">
+            <svg viewBox="0 0 13 13" aria-hidden="true"><path d="M4 7.6V4h3.6zM9 5.4V9H5.4z" fill="#0A4A0E"/></svg>
+          </button>
+        </div>
+        <span class="title">pane</span>
+      </div>
+      <div class="window-body">
+        <h1 class="hero-title" id="hero-title">Your Mac, with a taskbar.</h1>
+        <p class="hero-lede">pane brings the way Windows handles windows to macOS: a taskbar in place of the Dock, a Start menu on a tap of ⌘, snapping, Alt+Tab between windows, and apps that quit when their last window closes.</p>
+        <div class="actions">
+          <!-- Points at the public repo's latest release; the update check reads the same feed. -->
+          <a class="button button-primary" href="https://github.com/lemonadesaltbagel/pane/releases/latest">
+            <svg width="18" height="18" aria-hidden="true"><use href="#i-download"/></svg>Download pane
+          </a>
+          <a class="button button-quiet" href="https://github.com/lemonadesaltbagel/pane">View source</a>
+        </div>
+        <p class="fine">For macOS 14 or later. Free, with every Pro feature for the first 7 days.</p>
+        <p class="try">This page works like pane. Drag this window by its title bar, hover the green button for Snap Layouts, press <kbd>⌥</kbd><kbd>Tab</kbd> to switch windows, or tap <kbd>⌘</kbd> for Start.</p>
+      </div>
+    </div>
+
+    <div class="snap-flyout" id="snap-flyout" role="menu" aria-label="Snap Layouts">
+      <div class="layout"><button class="zone" role="menuitem" data-z="0,0,.5,1" aria-label="Left half"></button><button class="zone" role="menuitem" data-z=".5,0,.5,1" aria-label="Right half"></button></div>
+      <div class="layout"><button class="zone" role="menuitem" data-z="0,0,.667,1" aria-label="Left two thirds"></button><button class="zone" role="menuitem" data-z=".667,0,.333,1" aria-label="Right third"></button></div>
+      <div class="layout"><button class="zone" role="menuitem" data-z="0,0,.333,1" aria-label="Left third"></button><button class="zone" role="menuitem" data-z=".333,0,.334,1" aria-label="Middle third"></button><button class="zone" role="menuitem" data-z=".667,0,.333,1" aria-label="Right third"></button></div>
+      <div class="layout"><button class="zone" role="menuitem" data-z="0,0,.5,1" aria-label="Left half"></button><button class="zone" role="menuitem" data-z=".5,0,.5,.5" aria-label="Top right quarter"></button><button class="zone" role="menuitem" data-z=".5,.5,.5,.5" aria-label="Bottom right quarter"></button></div>
+      <div class="layout"><button class="zone" role="menuitem" data-z="0,0,.5,.5" aria-label="Top left quarter"></button><button class="zone" role="menuitem" data-z=".5,0,.5,.5" aria-label="Top right quarter"></button><button class="zone" role="menuitem" data-z="0,.5,.5,.5" aria-label="Bottom left quarter"></button><button class="zone" role="menuitem" data-z=".5,.5,.5,.5" aria-label="Bottom right quarter"></button></div>
+      <div class="layout"><button class="zone" role="menuitem" data-z="0,0,.333,1" aria-label="Left third"></button><button class="zone" role="menuitem" data-z=".333,0,.667,1" aria-label="Right two thirds"></button></div>
+    </div>
+  </section>
+
+  <div class="wrap">
+    <section class="section" id="features" aria-labelledby="features-title" data-section>
+      <h2 class="section-title" id="features-title">What pane adds to your Mac</h2>
+      <p class="section-lede">Everything you reach for on a PC, working with the Mac apps you already use. Your macOS shortcuts keep working too.</p>
+      <ul class="features">
+        <li>
+          <svg class="schematic" viewBox="0 0 240 140" aria-hidden="true">
+            <rect class="soft" x="1" y="1" width="238" height="138" rx="8"/>
+            <rect class="line" x="1" y="1" width="238" height="138" rx="8"/>
+            <rect class="mid" x="1" y="114" width="238" height="25" rx="0"/>
+            <rect class="line" x="80" y="119" width="14" height="14" rx="3"/>
+            <rect class="a" x="100" y="119" width="14" height="14" rx="3"/>
+            <rect class="a" x="102" y="135" width="10" height="2" rx="1"/>
+            <rect class="line" x="120" y="119" width="14" height="14" rx="3"/>
+            <rect class="line" x="140" y="119" width="14" height="14" rx="3"/>
+            <rect class="mid" x="210" y="121" width="20" height="10" rx="2"/>
+          </svg>
+          <h3>A taskbar in place of the Dock</h3>
+          <p>One button per window or per app, pinned apps, badges, and a clock with its calendar. Show desktop sits at the far corner. When pane quits, your Dock comes back as it was.</p>
+        </li>
+        <li>
+          <svg class="schematic" viewBox="0 0 240 140" aria-hidden="true">
+            <rect class="soft" x="1" y="1" width="238" height="138" rx="8"/>
+            <rect class="line" x="1" y="1" width="238" height="138" rx="8"/>
+            <rect class="mid" x="1" y="114" width="238" height="25"/>
+            <rect class="a" x="80" y="119" width="14" height="14" rx="3"/>
+            <rect class="line" x="70" y="14" width="100" height="92" rx="5" style="opacity:.8"/>
+            <rect class="mid" x="80" y="24" width="80" height="8" rx="4"/>
+            <g class="mid"><rect x="82" y="42" width="14" height="14" rx="3"/><rect x="106" y="42" width="14" height="14" rx="3"/><rect x="130" y="42" width="14" height="14" rx="3"/><rect x="82" y="64" width="14" height="14" rx="3"/><rect x="106" y="64" width="14" height="14" rx="3"/><rect x="130" y="64" width="14" height="14" rx="3"/></g>
+          </svg>
+          <h3>Start, on a tap of ⌘</h3>
+          <p>Search your apps, keep favourites in Pinned, browse All apps as a grid or a list, and lock, sleep, restart or shut down from the same place.</p>
+        </li>
+        <li>
+          <svg class="schematic" viewBox="0 0 240 140" aria-hidden="true">
+            <rect class="soft" x="1" y="1" width="238" height="138" rx="8"/>
+            <rect class="line" x="1" y="1" width="238" height="138" rx="8"/>
+            <rect class="mid" x="1" y="114" width="238" height="25"/>
+            <rect class="a" x="5" y="5" width="113" height="105" rx="4" style="opacity:.22"/>
+            <rect class="a-line" x="5" y="5" width="113" height="105" rx="4"/>
+            <rect class="line" x="52" y="34" width="96" height="62" rx="5" style="opacity:.8"/>
+            <path d="M10 58l0 18 5-5 4 8 3-1.5-4-8 7 0z" fill="var(--ink)"/>
+          </svg>
+          <h3>Snap to edges and corners</h3>
+          <p>Drag a window to an edge or a corner and see where it will land before you let go. Double-click a title bar or press the green button to maximize.</p>
+        </li>
+        <li>
+          <svg class="schematic" viewBox="0 0 240 140" aria-hidden="true">
+            <rect class="soft" x="1" y="1" width="238" height="138" rx="8"/>
+            <rect class="line" x="1" y="1" width="238" height="138" rx="8"/>
+            <rect class="mid" x="1" y="114" width="238" height="25"/>
+            <rect class="line" x="30" y="34" width="180" height="56" rx="6" style="opacity:.8"/>
+            <rect class="mid" x="42" y="46" width="44" height="32" rx="3"/>
+            <rect class="a" x="98" y="46" width="44" height="32" rx="3" style="opacity:.25"/>
+            <rect class="a-line" x="95" y="43" width="50" height="38" rx="5"/>
+            <rect class="mid" x="154" y="46" width="44" height="32" rx="3"/>
+          </svg>
+          <h3>Alt+Tab between windows</h3>
+          <p>Press <kbd>⌥</kbd><kbd>Tab</kbd> for every open window, most recent first, so two windows of the same app are two stops instead of one.</p>
+        </li>
+        <li>
+          <svg class="schematic" viewBox="0 0 240 140" aria-hidden="true">
+            <rect class="soft" x="1" y="1" width="238" height="138" rx="8"/>
+            <rect class="line" x="1" y="1" width="238" height="138" rx="8"/>
+            <rect class="mid" x="1" y="114" width="238" height="25"/>
+            <rect class="line" x="60" y="20" width="120" height="76" rx="5" style="opacity:.35;stroke-dasharray:4 4"/>
+            <circle cx="72" cy="31" r="4" fill="#FF5F57"/>
+            <rect class="line" x="113" y="119" width="14" height="14" rx="3"/>
+          </svg>
+          <h3>Close the last window, quit the app</h3>
+          <p>As on Windows, an app quits when its last window closes, so nothing stays running out of sight. Add apps to the opt-out list to keep them open.</p>
+        </li>
+        <li>
+          <svg class="schematic" viewBox="0 0 240 140" aria-hidden="true">
+            <rect class="soft" x="1" y="11" width="128" height="118" rx="7"/>
+            <rect class="line" x="1" y="11" width="128" height="118" rx="7"/>
+            <rect class="mid" x="1" y="108" width="128" height="21"/>
+            <rect class="soft" x="139" y="31" width="100" height="78" rx="6"/>
+            <rect class="line" x="139" y="31" width="100" height="78" rx="6"/>
+            <rect class="mid" x="139" y="92" width="100" height="17"/>
+            <rect class="a" x="143" y="35" width="46" height="53" rx="3" style="opacity:.22"/>
+            <rect class="a-line" x="143" y="35" width="46" height="53" rx="3"/>
+          </svg>
+          <h3>A taskbar on every display</h3>
+          <p>Maximize and snaps fit each display. Windows keep their snap when they move between displays, and unplugging one brings its windows home.</p>
+        </li>
+      </ul>
+    </section>
+
+    <section class="section" id="shortcuts" aria-labelledby="shortcuts-title" data-section>
+      <h2 class="section-title" id="shortcuts-title">The shortcuts you already know</h2>
+      <p class="section-lede">pane keeps every macOS shortcut and adds these. Each one can be changed in Settings.</p>
+      <table class="keys">
+        <thead><tr><th scope="col">Action</th><th scope="col">On Windows</th><th scope="col">With pane</th></tr></thead>
+        <tbody>
+          <tr><td>Open Start</td><td class="win">Win</td><td>Tap <kbd>⌘</kbd></td></tr>
+          <tr><td>Switch windows</td><td class="win">Alt+Tab</td><td><kbd>⌥</kbd><kbd>Tab</kbd></td></tr>
+          <tr><td>Snap left or right</td><td class="win">Win+← / →</td><td><kbd>⌃</kbd><kbd>⌥</kbd><kbd>←</kbd><span class="or">or</span><kbd>→</kbd></td></tr>
+          <tr><td>Maximize, or restore and minimize</td><td class="win">Win+↑ / ↓</td><td><kbd>⌃</kbd><kbd>⌥</kbd><kbd>↑</kbd><span class="or">or</span><kbd>↓</kbd></td></tr>
+          <tr><td>Move a window to another display</td><td class="win">Win+Shift+← / →</td><td><kbd>⌃</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>←</kbd><span class="or">or</span><kbd>→</kbd></td></tr>
+          <tr><td>Full screen</td><td class="win">F11</td><td><kbd>⌃</kbd><kbd>⌘</kbd><kbd>F</kbd></td></tr>
+          <tr><td>Close the window</td><td class="win">Alt+F4</td><td><kbd>⌥</kbd><kbd>F4</kbd></td></tr>
+          <tr><td>pane Settings</td><td class="win">Win+I</td><td><kbd>⌃</kbd><kbd>⌘</kbd><kbd>I</kbd></td></tr>
+        </tbody>
+      </table>
+      <p class="keys-note">With pane Pro you can switch to the Windows keyboard: <kbd>⌘</kbd> becomes the Win key, so <kbd>⌘</kbd><kbd>←</kbd> snaps, and Ctrl shortcuts like Ctrl+C and Ctrl+V work as they do on a PC. Terminals and virtual machines are left alone.</p>
+    </section>
+
+    <section class="section" id="editions" aria-labelledby="editions-title" data-section>
+      <h2 class="section-title" id="editions-title">Free, with Pro when you want more</h2>
+      <p class="section-lede">Download pane and every Pro feature is yours for 7 days. After that, pane keeps working as Free unless you buy Pro.</p>
+      <div class="editions">
+        <div class="edition edition-free">
+          <h3>Free</h3>
+          <p class="edition-terms">Free to use. The engine is open source under the AGPL.</p>
+          <ul>
+            <li>The taskbar, with pinned apps, badges and auto-hide</li>
+            <li>Start, with search, Pinned and All apps</li>
+            <li>Snapping, maximize and keyboard snaps</li>
+            <li>Alt+Tab between windows, with app icons</li>
+            <li>Quit on last window, with an opt-out list</li>
+            <li>A taskbar on every display</li>
+            <li>Settings, start at login and update checks</li>
+          </ul>
+          <a class="button button-quiet" href="https://github.com/lemonadesaltbagel/pane/releases/latest">
+            <svg width="18" height="18" aria-hidden="true"><use href="#i-download"/></svg>Download pane
+          </a>
+        </div>
+        <div class="edition edition-pro">
+          <h3>Pro</h3>
+          <!-- TODO(owner): put the price here, e.g. "$19, a one-time purchase." -->
+          <p class="edition-terms">A one-time purchase. Everything in Free, and:</p>
+          <ul>
+            <li>Live previews of your windows on the taskbar and in Alt+Tab</li>
+            <li>Virtual desktops and Task View</li>
+            <li>Snap Layouts and Snap Assist</li>
+            <li>The Windows keyboard, with ⌘ as the Win key</li>
+            <li>A tray that tidies away your menu-bar icons</li>
+            <li>Per-window menus</li>
+            <li>Recent files and Quick Link in Start</li>
+            <li>Windows-style full screen, on the desktop you're on</li>
+            <li>Your own exceptions for each app</li>
+          </ul>
+          <!-- TODO(owner): link to the checkout page (the same URL as LicenseKeys.embeddedPurchaseURL). -->
+          <a class="button button-primary" href="#buy" data-todo="checkout">Buy pane Pro</a>
+          <p class="fine">Your licence key arrives by email. Paste it in Settings ▸ pane Pro.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="your-mac" aria-labelledby="your-mac-title" data-section>
+      <h2 class="section-title" id="your-mac-title">pane changes a few settings, and always puts them back</h2>
+      <p class="section-lede">pane changes as little as it can, keeps a copy of anything it does change, and works without turning off any of your Mac's protections.</p>
+      <dl class="promises">
+        <div>
+          <dt>One permission</dt>
+          <dd>pane needs Accessibility, and nothing else, to run. Screen Recording and file access are optional: without them, only the feature that uses them is turned off.</dd>
+        </div>
+        <div>
+          <dt>Your settings, restored</dt>
+          <dd>pane saves the Dock and tiling settings it changes and restores them when it quits, when you log out, or the next time it starts after a crash.</dd>
+        </div>
+        <div>
+          <dt>No changes to System Integrity Protection</dt>
+          <dd>pane uses a few private macOS APIs where public ones can't do the job, such as focusing one window of an app. SIP stays on.</dd>
+        </div>
+        <div>
+          <dt>Open source at its core</dt>
+          <dd>The engine is <a href="https://github.com/lemonadesaltbagel/pane">on GitHub</a> with its tests. Read the code, or build it yourself.</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="section" id="questions" aria-labelledby="questions-title" data-section>
+      <h2 class="section-title" id="questions-title">Questions</h2>
+      <div class="faq">
+        <details>
+          <summary>Which Macs does pane run on?</summary>
+          <p>Any Mac with macOS 14 Sonoma or later. pane is designed for macOS 26, where the taskbar uses the same glass as the Dock and the menu bar.</p>
+        </details>
+        <details>
+          <summary>What happens to the Dock?</summary>
+          <p>The taskbar takes its place. pane shrinks the Dock and tucks it under the taskbar while it runs, and puts it back as it was when pane quits.</p>
+        </details>
+        <details>
+          <summary>Will my Mac shortcuts still work?</summary>
+          <p>Yes. pane's own shortcuts use keys macOS leaves free, like <kbd>⌃</kbd><kbd>⌥</kbd> and an arrow. If you'd rather use the Windows layout, pane Pro has a Windows keyboard you can turn on in Settings.</p>
+        </details>
+        <details>
+          <summary>I already use another switcher or menu-bar app. Will they clash?</summary>
+          <p>When pane first starts, it looks for apps that do the same jobs, such as other Alt+Tab switchers and menu-bar organisers, and lets you choose which one does what.</p>
+        </details>
+        <details>
+          <summary>Why isn't pane on the Mac App Store?</summary>
+          <p>The App Store doesn't accept apps that control other apps' windows the way pane does, or that use private macOS APIs. pane is signed and comes straight from its developer.</p>
+        </details>
+        <details>
+          <summary>What happens when the trial ends?</summary>
+          <p>pane switches to Free and keeps running. Pro features turn off, and your Pro settings are kept for when you buy Pro.</p>
+        </details>
+        <details>
+          <summary>Is pane made by Microsoft?</summary>
+          <p>No. pane is an independent app. It isn't affiliated with, endorsed by or sponsored by Microsoft or Apple. "Windows" describes the way of working that pane brings to the Mac.</p>
+        </details>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <span class="brand"><svg aria-hidden="true"><use href="#i-mark"/></svg>pane</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/lemonadesaltbagel/pane">Source</a>
+      <a href="https://github.com/lemonadesaltbagel/pane/releases">Releases</a>
+      <a href="https://github.com/lemonadesaltbagel/pane/issues">Report a problem</a>
+      <a href="https://github.com/lemonadesaltbagel/pane/blob/main/LICENSE">Licence</a>
+    </nav>
+    <p>© 2026 lemonadesaltbagel. pane's engine is licensed under the GNU AGPL, version 3 or later. pane isn't affiliated with Microsoft or Apple. Windows is a trademark of Microsoft Corporation. Mac and macOS are trademarks of Apple Inc.</p>
+  </div>
+</footer>
+
+<div class="toast" id="toast" role="status" aria-live="polite">
+  <strong>pane quit</strong>
+  <p>You closed its last window, so the app quit, as it would on Windows. Click pane on the taskbar to open it again.</p>
+</div>
+
+<div class="switcher" id="switcher" role="listbox" aria-label="Switch windows" hidden></div>
+
+<div class="start" id="start" role="dialog" aria-modal="false" aria-label="Start">
+  <label class="start-search">
+    <svg aria-hidden="true"><use href="#i-search"/></svg>
+    <input id="start-search" type="search" placeholder="Search this page" autocomplete="off" aria-label="Search this page">
+  </label>
+  <h2>Pinned</h2>
+  <ul class="start-apps">
+    <li><button class="start-app" type="button" data-open="finder"><img src="assets/icons/finder.png" alt="">Finder</button></li>
+    <li><button class="start-app" type="button" data-open="safari"><img src="assets/icons/safari.png" alt="">Safari</button></li>
+    <li><span class="start-app"><img src="assets/icons/mail.png" alt="">Mail</span></li>
+    <li><span class="start-app"><img src="assets/icons/calendar.png" alt="">Calendar</span></li>
+    <li><span class="start-app"><img src="assets/icons/photos.png" alt="">Photos</span></li>
+    <li><span class="start-app"><img src="assets/icons/messages.png" alt="">Messages</span></li>
+    <li><span class="start-app"><img src="assets/icons/notes.png" alt="">Notes</span></li>
+    <li><span class="start-app"><img src="assets/icons/app-store.png" alt="">App Store</span></li>
+    <li><span class="start-app"><img src="assets/icons/system-settings.png" alt="">System Settings</span></li>
+    <li><span class="start-app"><img src="assets/icons/calculator.png" alt="">Calculator</span></li>
+    <li><span class="start-app"><img src="assets/icons/maps.png" alt="">Maps</span></li>
+    <li><span class="start-app"><img src="assets/icons/music.png" alt="">Music</span></li>
+  </ul>
+  <h2>On this page</h2>
+  <ul class="start-links">
+    <li><a href="#features" data-keywords="features taskbar start snapping alt tab displays"><svg aria-hidden="true"><use href="#i-features"/></svg><span>What it adds<small>Taskbar, Start, snapping and more</small></span></a></li>
+    <li><a href="#shortcuts" data-keywords="shortcuts keys keyboard"><svg aria-hidden="true"><use href="#i-keys"/></svg><span>Shortcuts<small>Windows keys and pane's, side by side</small></span></a></li>
+    <li><a href="#editions" data-keywords="free pro price buy trial licence license"><svg aria-hidden="true"><use href="#i-tag"/></svg><span>Free and Pro<small>A 7-day trial, then a one-time purchase</small></span></a></li>
+    <li><a href="#your-mac" data-keywords="settings permissions privacy restore dock sip safety"><svg aria-hidden="true"><use href="#i-restore"/></svg><span>Your settings<small>What pane changes and puts back</small></span></a></li>
+    <li><a href="#questions" data-keywords="questions faq help"><svg aria-hidden="true"><use href="#i-question"/></svg><span>Questions<small>Macs, the Dock, the App Store</small></span></a></li>
+    <li><a href="https://github.com/lemonadesaltbagel/pane/releases/latest" data-keywords="download install release"><svg aria-hidden="true"><use href="#i-download"/></svg><span>Download pane<small>For macOS 14 or later</small></span></a></li>
+  </ul>
+  <p class="start-empty" id="start-empty" hidden></p>
+  <div class="start-foot">
+    <span class="start-who"><svg aria-hidden="true"><use href="#i-app"/></svg>pane</span>
+    <nav aria-label="pane links">
+      <a href="https://github.com/lemonadesaltbagel/pane/releases/latest" aria-label="Download pane" title="Download pane"><svg aria-hidden="true"><use href="#i-download"/></svg></a>
+      <a href="https://github.com/lemonadesaltbagel/pane" aria-label="pane on GitHub" title="pane on GitHub"><svg aria-hidden="true"><use href="#i-github"/></svg></a>
+    </nav>
+  </div>
+</div>
+
+<div class="taskbar" role="toolbar" aria-label="Taskbar">
+  <div class="taskbar-apps">
+    <button class="tb-button tb-start" id="start-button" type="button" aria-label="Start" aria-expanded="false" aria-controls="start" title="Start (tap ⌘)">
+      <svg aria-hidden="true"><use href="#i-mark"/></svg>
+    </button>
+    <button class="tb-button is-running" type="button" data-win="pane" aria-label="pane" title="pane"><svg aria-hidden="true"><use href="#i-app"/></svg></button>
+    <button class="tb-button is-running" type="button" data-win="finder" aria-label="Finder" title="Finder"><img src="assets/icons/finder.png" alt=""></button>
+    <button class="tb-button is-running" type="button" data-win="safari" aria-label="Safari" title="Safari"><img src="assets/icons/safari.png" alt=""></button>
+    <span class="tb-button" title="Mail"><img src="assets/icons/mail.png" alt="Mail"><span class="badge" aria-label="3 unread">3</span></span>
+    <span class="tb-button" title="Calendar"><img src="assets/icons/calendar.png" alt="Calendar"></span>
+    <span class="tb-button tb-optional" title="Messages"><img src="assets/icons/messages.png" alt="Messages"><span class="badge" aria-label="1 unread">1</span></span>
+    <span class="tb-button tb-optional" title="Photos"><img src="assets/icons/photos.png" alt="Photos"></span>
+  </div>
+  <div class="tray">
+    <a class="tb-button tb-github" href="https://github.com/lemonadesaltbagel/pane" aria-label="pane on GitHub" title="pane on GitHub"><svg aria-hidden="true"><use href="#i-github"/></svg></a>
+    <div class="clock" aria-hidden="true"><span id="clock-time">--:--</span><span id="clock-date"></span></div>
+    <button class="show-desktop" id="show-desktop" type="button" aria-label="Show desktop" title="Show desktop"></button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const desktop = document.querySelector('.desktop');
+  const preview = document.querySelector('.snap-preview');
+  const toast = document.getElementById('toast');
+  const menubar = document.querySelector('.menubar');
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  const compactQuery = matchMedia('(max-width: 720px)');
+  const compact = () => compactQuery.matches;
+  const MENU = 30, BAR = 48, EDGE = 18, GAP = 8;   // GAP: pane Pro's snap gaps
+  const later = (ms, f) => setTimeout(f, reduceMotion.matches ? 0 : ms);
+
+  // The work area: below the menu bar, above the taskbar.
+  const area = () => ({ y: MENU, w: desktop.clientWidth, h: desktop.clientHeight - MENU - BAR });
+  const ZONES = {
+    max: [0, 0, 1, 1], left: [0, 0, .5, 1], right: [.5, 0, .5, 1],
+    tl: [0, 0, .5, .5], tr: [.5, 0, .5, .5], bl: [0, .5, .5, .5], br: [.5, .5, .5, .5]
+  };
+
+  // ---------- windows ----------
+  const wins = {};
+  for (const el of document.querySelectorAll('.window')) {
+    const id = el.dataset.win;
+    wins[id] = { id, el, state: { pane: 'left', finder: 'tr', safari: 'br' }[id], custom: null, restore: null, shown: 'open' };
+  }
+  const pane = wins.pane;
+  let order = ['pane', 'finder', 'safari'];        // most recent first
+
+  function rectFor(w, state = w.state) {
+    if (state === 'floating') return w.restore;
+    const f = state === 'custom' ? w.custom : ZONES[state], a = area();
+    const g = state === 'max' ? 0 : GAP / 2;   // half a gap around the area and around each window
+    const ax = g, ay = a.y + g, aw = a.w - 2 * g, ah = a.h - 2 * g;
+    const x = ax + Math.round(aw * f[0]), y = ay + Math.round(ah * f[1]);
+    const r = { x, y, w: ax + Math.round(aw * (f[0] + f[2])) - x, h: ay + Math.round(ah * (f[1] + f[3])) - y };
+    return { x: r.x + g, y: r.y + g, w: r.w - 2 * g, h: r.h - 2 * g };
+  }
+
+  function floatRect(w) {
+    const a = area();
+    if (w !== pane) {
+      const width = Math.min(760, a.w * .44), x = w.id === 'finder' ? a.w * .5 : a.w * .38;
+      return { x: Math.round(x), y: Math.round(a.y + a.h * (w.id === 'finder' ? .06 : .4)), w: Math.round(width), h: Math.round(width / 1.69) };
+    }
+    const gutter = a.w <= 720 ? 16 : 24;
+    const left = Math.max(gutter, (a.w - 1120) / 2 + gutter);
+    const width = Math.min(680, a.w - 2 * left);
+    Object.assign(pane.el.style, { width: width + 'px', height: 'auto' });
+    const height = Math.min(pane.el.offsetHeight, a.h - 16);
+    return { x: Math.round(left), y: Math.round(a.y + Math.max(16, Math.min(a.h * .1, a.h - height - 16))), w: Math.round(width), h: Math.round(height) };
+  }
+
+  function place(w, r, animate) {
+    w.el.classList.toggle('is-animating', !!animate && !reduceMotion.matches);
+    Object.assign(w.el.style, { left: r.x + 'px', top: r.y + 'px', width: r.w + 'px', height: r.h + 'px' });
+  }
+
+  function setState(w, state, animate = true, custom = null) {
+    if (compact()) return;
+    w.state = state;
+    if (custom) w.custom = custom;
+    place(w, rectFor(w), animate);
+  }
+
+  function layout() {
+    if (compact()) {
+      for (const w of Object.values(wins)) { w.el.removeAttribute('style'); w.el.classList.remove('is-animating'); }
+      return;
+    }
+    for (const w of Object.values(wins)) {
+      if (!w.restore || w.state === 'floating') w.restore = floatRect(w);
+      place(w, rectFor(w), false);
+    }
+    stack();
+  }
+
+  // ---------- focus, minimize, close ----------
+  const taskButtons = [...document.querySelectorAll('.taskbar [data-win]')];
+  const activeId = () => order.find(id => wins[id].shown === 'open');
+
+  function stack() {
+    order.forEach((id, i) => { wins[id].el.style.zIndex = 20 - i; });
+    const active = activeId();
+    for (const b of taskButtons) {
+      const w = wins[b.dataset.win];
+      b.classList.toggle('is-running', w.shown !== 'closed');
+      b.classList.toggle('is-active', b.dataset.win === active);
+    }
+  }
+  function focus(id) {
+    order = [id, ...order.filter(x => x !== id)];
+    stack();
+  }
+  function hide(w, how) {
+    w.shown = how;
+    w.el.classList.remove('is-returning');
+    w.el.classList.add('is-hidden');
+    order = [...order.filter(x => x !== w.id), w.id];
+    if (how === 'closed') {
+      toast.classList.add('is-on');
+      clearTimeout(hide.t);
+      hide.t = setTimeout(() => toast.classList.remove('is-on'), 6500);
+    }
+    stack();
+  }
+  function show(w) {
+    if (w.shown === 'closed') { w.state = 'floating'; w.restore = null; layout(); }
+    w.shown = 'open';
+    if (w === pane) toast.classList.remove('is-on');
+    w.el.classList.add('is-returning');
+    w.el.classList.remove('is-hidden');
+    focus(w.id);
+  }
+  for (const w of Object.values(wins)) w.el.addEventListener('pointerdown', () => focus(w.id));
+
+  for (const b of taskButtons) {
+    b.addEventListener('click', () => {
+      const w = wins[b.dataset.win];
+      if (compact() && w !== pane) return;
+      if (w.shown !== 'open') show(w);
+      else if (activeId() === w.id && !compact()) hide(w, 'min');
+      else focus(w.id);
+      if (desktop.getBoundingClientRect().bottom < innerHeight * .5) desktop.scrollIntoView();
+    });
+  }
+  pane.el.querySelector('.light-close').addEventListener('click', () => hide(pane, 'closed'));
+  pane.el.querySelector('.light-min').addEventListener('click', () => hide(pane, 'min'));
+  pane.el.querySelector('.light-max').addEventListener('click', () => { closeFlyout(); setState(pane, pane.state === 'max' ? 'floating' : 'max'); });
+
+  // Show desktop: the far corner minimizes every window, and a second click brings them back.
+  let desktopShown = null;
+  document.getElementById('show-desktop').addEventListener('click', () => {
+    if (desktopShown) { desktopShown.forEach(id => show(wins[id])); desktopShown = null; }
+    else { desktopShown = order.filter(id => wins[id].shown === 'open').reverse(); desktopShown.forEach(id => hide(wins[id], 'min')); }
+    if (desktop.getBoundingClientRect().bottom < innerHeight * .5) desktop.scrollIntoView();
+  });
+
+  // ---------- dragging pane's window, with Windows' snap zones ----------
+  let drag = null;
+  function zoneAt(px, py) {
+    const a = area();
+    if (px <= EDGE || px >= a.w - EDGE) {
+      const left = px <= EDGE;
+      if (py < a.y + a.h * .22) return left ? 'tl' : 'tr';
+      if (py > a.y + a.h * .78) return left ? 'bl' : 'br';
+      return left ? 'left' : 'right';
+    }
+    if (py <= a.y + 6) return 'max';
+    return null;
+  }
+  function showPreview(r, from) {
+    if (from && !preview.classList.contains('is-on')) {
+      preview.style.transition = 'none';
+      Object.assign(preview.style, { left: from.x - 20 + 'px', top: from.y - 20 + 'px', width: '40px', height: '40px' });
+      preview.offsetWidth;
+      preview.style.transition = '';
+    }
+    Object.assign(preview.style, { left: r.x + 6 + 'px', top: r.y + 6 + 'px', width: r.w - 12 + 'px', height: r.h - 12 + 'px' });
+    preview.classList.add('is-on');
+  }
+  const titlebar = pane.el.querySelector('.titlebar');
+  titlebar.addEventListener('pointerdown', e => {
+    if (compact() || e.button !== 0 || e.target.closest('.light')) return;
+    cancelIntro();
+    const d = desktop.getBoundingClientRect();
+    drag = { sx: e.clientX, sy: e.clientY, dx: e.clientX - d.left - pane.el.offsetLeft, dy: e.clientY - d.top - pane.el.offsetTop, moved: false, zone: null };
+    titlebar.setPointerCapture(e.pointerId);
+  });
+  titlebar.addEventListener('pointermove', e => {
+    if (!drag) return;
+    if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 4) return;
+    const d = desktop.getBoundingClientRect(), a = area();
+    const px = e.clientX - d.left, py = e.clientY - d.top;
+    if (!drag.moved) {
+      drag.moved = true;
+      closeFlyout();
+      pane.el.classList.add('is-dragging');
+      if (pane.state !== 'floating') {
+        // Unsnap: back to the size it had, keeping the pointer at the same place along the title bar.
+        const frac = drag.dx / pane.el.offsetWidth;
+        pane.state = 'floating';
+        drag.dx = Math.round(pane.restore.w * frac);
+        drag.dy = Math.min(drag.dy, 20);
+      }
+    }
+    const r = {
+      x: Math.max(-pane.restore.w + 80, Math.min(a.w - 80, px - drag.dx)),
+      y: Math.max(a.y, Math.min(a.y + a.h - 40, py - drag.dy)),
+      w: pane.restore.w, h: pane.restore.h
+    };
+    place(pane, r, false);
+    pane.restore = r;
+    const zone = zoneAt(px, py);
+    if (zone !== drag.zone) {
+      drag.zone = zone;
+      if (zone) showPreview(rectFor(pane, zone), { x: px, y: py });
+      else preview.classList.remove('is-on');
+    }
+  });
+  function endDrag() {
+    if (!drag) return;
+    const { moved, zone } = drag;
+    drag = null;
+    pane.el.classList.remove('is-dragging');
+    preview.classList.remove('is-on');
+    if (moved && zone) setState(pane, zone);
+  }
+  titlebar.addEventListener('pointerup', endDrag);
+  titlebar.addEventListener('pointercancel', endDrag);
+  titlebar.addEventListener('dblclick', e => {
+    if (e.target.closest('.light')) return;
+    setState(pane, pane.state === 'max' ? 'floating' : 'max');
+  });
+
+  // ---------- Snap Layouts on the green button ----------
+  const flyout = document.getElementById('snap-flyout');
+  const green = pane.el.querySelector('.light-max');
+  let flyoutTimer = null;
+  for (const zone of flyout.querySelectorAll('.zone')) {
+    const [x, y, w, h] = zone.dataset.z.split(',').map(Number);
+    Object.assign(zone.style, { left: `calc(${x * 100}% + 2px)`, top: `calc(${y * 100}% + 2px)`, width: `calc(${w * 100}% - 4px)`, height: `calc(${h * 100}% - 4px)` });
+    zone.addEventListener('mouseenter', () => showPreview(rectFor({ state: 'custom', custom: [x, y, w, h] })));
+    zone.addEventListener('mouseleave', () => preview.classList.remove('is-on'));
+    zone.addEventListener('click', () => {
+      closeFlyout();
+      preview.classList.remove('is-on');
+      setState(pane, 'custom', true, [x, y, w, h]);
+      focus('pane');
+    });
+  }
+  function openFlyout() {
+    if (compact() || pane.shown !== 'open') return;
+    const r = pane.el.getBoundingClientRect(), d = desktop.getBoundingClientRect();
+    flyout.style.left = Math.max(8, Math.min(d.width - 320, r.left - d.left + 20)) + 'px';
+    flyout.style.top = (r.top - d.top + 34) + 'px';
+    flyout.classList.add('is-open');
+  }
+  function closeFlyout() { clearTimeout(flyoutTimer); flyout.classList.remove('is-open'); }
+  green.addEventListener('mouseenter', () => { clearTimeout(flyoutTimer); flyoutTimer = setTimeout(openFlyout, 350); });
+  green.addEventListener('mouseleave', () => { clearTimeout(flyoutTimer); flyoutTimer = setTimeout(() => { if (!flyout.matches(':hover')) closeFlyout(); }, 250); });
+  flyout.addEventListener('mouseleave', () => { flyoutTimer = setTimeout(() => { if (!green.matches(':hover')) closeFlyout(); }, 250); });
+  green.addEventListener('keydown', e => { if (e.key === 'ArrowDown') { e.preventDefault(); openFlyout(); flyout.querySelector('.zone').focus(); } });
+  flyout.addEventListener('keydown', e => { if (e.key === 'Escape') { closeFlyout(); green.focus(); } });
+  flyout.addEventListener('focusout', e => { if (!flyout.contains(e.relatedTarget)) closeFlyout(); });
+
+  // ---------- keyboard: ⌃⌥ arrows follow Windows' Win+Arrow rules ----------
+  const heroOnScreen = () => desktop.getBoundingClientRect().bottom > innerHeight / 2;
+  const MOVES = {
+    ArrowLeft: { floating: 'left', max: 'left', right: 'floating', tr: 'tl', br: 'bl', custom: 'left' },
+    ArrowRight: { floating: 'right', max: 'right', left: 'floating', tl: 'tr', bl: 'br', custom: 'right' },
+    ArrowUp: { floating: 'max', left: 'tl', right: 'tr', bl: 'left', br: 'right', custom: 'max' },
+    ArrowDown: { max: 'floating', floating: 'min', left: 'bl', right: 'br', tl: 'left', tr: 'right', custom: 'floating' }
+  };
+  document.addEventListener('keydown', e => {
+    if (!(e.ctrlKey && e.altKey && !e.metaKey) || !MOVES[e.key] || compact()) return;
+    if (pane.shown !== 'open' || !heroOnScreen()) return;
+    const next = MOVES[e.key][pane.state];
+    e.preventDefault();
+    cancelIntro();
+    if (next === 'min') hide(pane, 'min');
+    else if (next) { setState(pane, next); focus('pane'); }
+  });
+
+  // ---------- Alt+Tab ----------
+  const switcher = document.getElementById('switcher');
+  const TILES = {
+    pane: { name: 'pane', icon: '<svg aria-hidden="true"><use href="#i-app"/></svg>', thumb: '<div class="mini-pane">Your Mac, with a taskbar.<span></span></div>' },
+    finder: { name: 'Applications', icon: '<img src="assets/icons/finder.png" alt="">', thumb: '<img src="assets/windows/finder.png" alt="">' },
+    safari: { name: 'pane on GitHub', icon: '<img src="assets/icons/safari.png" alt="">', thumb: '<img src="assets/windows/safari.png" alt="">' }
+  };
+  let switching = null;
+  function renderSwitcher() {
+    switcher.innerHTML = switching.list.map((id, i) =>
+      `<button class="switch-tile" type="button" role="option" aria-selected="${i === switching.sel}" data-id="${id}"><span class="switch-head">${TILES[id].icon}${TILES[id].name}</span><span class="switch-thumb">${TILES[id].thumb}</span></button>`).join('');
+  }
+  function commitSwitch(id) {
+    switcher.hidden = true;
+    switching = null;
+    if (id) { const w = wins[id]; if (w.shown !== 'open') show(w); else focus(id); }
+  }
+  switcher.addEventListener('click', e => { const t = e.target.closest('.switch-tile'); if (t) commitSwitch(t.dataset.id); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Tab' && e.altKey && !e.metaKey && !e.ctrlKey && heroOnScreen() && !compact()) {
+      e.preventDefault();
+      cancelIntro();
+      if (!switching) {
+        const list = order.filter(id => wins[id].shown !== 'closed');
+        if (list.length < 2) return;
+        switching = { list, sel: 0 };
+        switcher.hidden = false;
+      }
+      switching.sel = (switching.sel + (e.shiftKey ? -1 : 1) + switching.list.length) % switching.list.length;
+      renderSwitcher();
+    } else if (e.key === 'Escape' && switching) {
+      commitSwitch(null);
+    }
+  });
+  document.addEventListener('keyup', e => { if (e.key === 'Alt' && switching) commitSwitch(switching.list[switching.sel]); });
+  addEventListener('blur', () => { if (switching) commitSwitch(null); });
+
+  // ---------- Start: the button, Esc, a click outside, a lone tap of ⌘ ----------
+  const start = document.getElementById('start');
+  const startButton = document.getElementById('start-button');
+  const search = document.getElementById('start-search');
+  const empty = document.getElementById('start-empty');
+  function setStart(open) {
+    start.classList.toggle('is-open', open);
+    startButton.setAttribute('aria-expanded', String(open));
+    if (open) { search.value = ''; filterStart(); search.focus({ preventScroll: true }); }
+  }
+  function filterStart() {
+    const q = search.value.trim().toLowerCase();
+    let shown = 0;
+    for (const li of start.querySelectorAll('.start-apps li, .start-links li')) {
+      const a = li.firstElementChild;
+      const hit = !q || (a.textContent + ' ' + (a.dataset.keywords || '')).toLowerCase().includes(q);
+      li.hidden = !hit;
+      shown += hit;
+    }
+    start.querySelectorAll('h2').forEach(h => { h.hidden = !!q; });
+    empty.hidden = shown > 0;
+    if (!shown) empty.textContent = `Nothing on this page matches “${search.value.trim()}”. Try “shortcuts” or “price”.`;
+  }
+  search.addEventListener('input', filterStart);
+  search.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    const first = start.querySelector('.start-links li:not([hidden]) a, .start-apps li:not([hidden]) button');
+    if (first) { e.preventDefault(); first.click(); }
+  });
+  startButton.addEventListener('click', () => setStart(!start.classList.contains('is-open')));
+  start.addEventListener('click', e => {
+    const app = e.target.closest('[data-open]');
+    if (app) { setStart(false); show(wins[app.dataset.open]); desktop.scrollIntoView(); }
+    else if (e.target.closest('a')) setStart(false);
+  });
+  document.addEventListener('pointerdown', e => {
+    if (start.classList.contains('is-open') && !start.contains(e.target) && !startButton.contains(e.target)) setStart(false);
+  });
+  let metaAlone = false;
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && start.classList.contains('is-open')) { setStart(false); startButton.focus(); }
+    metaAlone = e.key === 'Meta' && !e.repeat;
+  });
+  document.addEventListener('keyup', e => {
+    if (e.key === 'Meta' && metaAlone) setStart(!start.classList.contains('is-open'));
+    metaAlone = false;
+  });
+  document.addEventListener('mousedown', () => { metaAlone = false; });
+
+  // ---------- the menu bar marks the section on screen ----------
+  const links = new Map([...menubar.querySelectorAll('[data-for]')].map(a => [a.dataset.for, a]));
+  const spy = new IntersectionObserver(entries => {
+    entries.forEach(en => { if (en.isIntersecting) links.forEach((a, id) => a.toggleAttribute('aria-current', id === en.target.id)); });
+  }, { rootMargin: '-40% 0px -55% 0px' });
+  document.querySelectorAll('[data-section]').forEach(s => spy.observe(s));
+  new IntersectionObserver(([en]) => menubar.classList.toggle('is-solid', !en.isIntersecting), { rootMargin: `-${MENU}px 0px 0px 0px` })
+    .observe(desktop);
+
+  // ---------- clocks ----------
+  const timeEl = document.getElementById('clock-time'), dateEl = document.getElementById('clock-date'), mbClock = document.getElementById('mb-clock');
+  function tick() {
+    const now = new Date();
+    timeEl.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    dateEl.textContent = now.toLocaleDateString();
+    mbClock.textContent = now.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) + '  ' + now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    setTimeout(tick, 60000 - (now.getSeconds() * 1000 + now.getMilliseconds()));
+  }
+  tick();
+
+  // ---------- the opening: the windows snap into their layout ----------
+  const introTimers = [];
+  function cancelIntro() {
+    if (!introTimers.length) return;
+    introTimers.splice(0).forEach(clearTimeout);
+    preview.classList.remove('is-on');
+    for (const [id, zone] of [['finder', 'tr'], ['safari', 'br'], ['pane', 'left']]) if (wins[id].state === 'floating' && id !== 'pane') setState(wins[id], zone, false);
+  }
+  function intro() {
+    if (compact() || reduceMotion.matches) return;
+    for (const w of Object.values(wins)) { w.state = 'floating'; place(w, w.restore, false); }
+    order = ['pane', 'safari', 'finder']; stack();
+    [['finder', 'tr', 500], ['safari', 'br', 1000], ['pane', 'left', 1500]].forEach(([id, zone, t]) => {
+      introTimers.push(setTimeout(() => {
+        const w = wins[id], r = rectFor(w, zone), from = w.restore;
+        showPreview(r, { x: from.x + from.w / 2, y: from.y + 20 });
+        introTimers.push(setTimeout(() => { preview.classList.remove('is-on'); setState(w, zone); focus(id); if (id === 'pane') introTimers.length = 0; }, 260));
+      }, t));
+    });
+  }
+
+  addEventListener('resize', () => { closeFlyout(); layout(); });
+  compactQuery.addEventListener('change', layout);
+  layout();
+  stack();
+  (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => {
+    if (!compact()) { pane.restore = floatRect(pane); place(pane, rectFor(pane), false); }
+    intro();
+  });
+})();
+</script>
+</body>
+</html>
